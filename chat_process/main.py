@@ -3,78 +3,83 @@ import config
 import threading
 import sys
 
-incoming_sockets = [None] * len(config.config['hosts'])
 
-out_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-out_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+class Main:
+    my_ID = 0
+    sock = None
 
-def init_sockets():
-    for index, host in enumerate(config.config['hosts']):
-        # initialize incoming sockets
+    def init_socket(self, id):
+        host = config.config['hosts'][id]
         ip = host[0]
         port = host[1]
-        out_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        out_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
-        out_sock.bind((ip, port))
-        out_sock.settimeout(0.01)
-        incoming_sockets[index] = out_sock
 
-def unicast_send(destination, message):
-    ''' destination: integer process ID
-        message: string message '''
-    host = config.config['hosts'][destination]
-    ip = host[0]
-    port = host[1]
-    out_sock.sendto(message.encode('utf-8'), (ip, port))
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        self.sock.bind((ip, port))
+        self.sock.settimeout(0.01)
 
-def unicast_receive(source):
-    ''' source: integer process ID
-        return: message string '''
-    data, addr = incoming_sockets[source].recvfrom(1024)
-    return data
+    def unicast_send(self, destination, message):
+        ''' destination: integer process ID
+            message: string message '''
+        host = config.config['hosts'][destination]
+        ip = host[0]
+        port = host[1]
+        self.sock.sendto(message.encode('utf-8'), (ip, port))
 
-def multicast(message):
-    ''' unicast the message to all known clients '''
-    for id, host in enumerate(config.config['hosts']):
-        unicast_send(id, message)
+    def unicast_receive(self, source):
+        ''' source: integer process ID
+            return: message string '''
+        data, addr = self.sock.recvfrom(1024)
+        return data
 
-def deliver(source):
-    ''' source: source process id
-        return: incoming message from the source process '''
-    return unicast_receive(source)
-
-def process_message_out():
-    for line in sys.stdin:
-        multicast(line)
-
-
-def process_message_in():
-    while True:
+    def multicast(self, message):
+        ''' unicast the message to all known clients '''
         for id, host in enumerate(config.config['hosts']):
+            self.unicast_send(id, message)
+
+    def deliver(self, source):
+        ''' source: source process id
+            return: incoming message from the source process '''
+        return self.unicast_receive(source)
+
+    def process_message_out(self):
+        for line in sys.stdin:
+            self.multicast(line)
+
+
+    def process_message_in(self):
+        while True:
             try:
-                message = deliver(id)
-                print(id, message)
+                message = self.deliver(self.my_ID)
+                print(message)
             except socket.timeout:
                 pass
             except BlockingIOError:
                 pass
 
-def run():
-    init_sockets()
+    def run(self):
+        if len(sys.argv) != 2:
+            print('Usage: {} [process ID]'.format(sys.argv[0]))
+            return
 
-    # multithreading to process sending/receiving messages
-    out_thread = threading.Thread(target=process_message_out)
-    out_thread.daemon = True
+        self.my_ID = int(sys.argv[1])
 
-    in_thread = threading.Thread(target=process_message_in)
-    in_thread.daemon = True
+        self.init_socket(self.my_ID)
 
-    out_thread.start()
-    in_thread.start()
+        # multithreading to process sending/receiving messages
+        out_thread = threading.Thread(target=self.process_message_out)
+        out_thread.daemon = True
 
-    out_thread.join()
-    in_thread.join()
+        in_thread = threading.Thread(target=self.process_message_in)
+        in_thread.daemon = True
+
+        out_thread.start()
+        in_thread.start()
+
+        out_thread.join()
+        in_thread.join()
 
 
 if __name__ == '__main__':
-    run()
+    chat_process = Main()
+    chat_process.run()
