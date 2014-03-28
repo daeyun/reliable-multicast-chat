@@ -1,5 +1,6 @@
 import socket
 import config
+import struct
 import threading
 import sys
 
@@ -7,6 +8,7 @@ import sys
 class Main:
     my_ID = 0
     sock = None
+    message_size = 2048
 
     def init_socket(self, id):
         host = config.config['hosts'][id]
@@ -24,13 +26,19 @@ class Main:
         host = config.config['hosts'][destination]
         ip = host[0]
         port = host[1]
-        self.sock.sendto(message.encode('utf-8'), (ip, port))
+
+        message = str(self.my_ID) + "," + message
+        self.sock.sendto(message.encode("utf-8"), (ip, port))
 
     def unicast_receive(self, source):
         ''' source: integer process ID
             return: message string '''
-        data, addr = self.sock.recvfrom(1024)
-        return data
+        data, addr = self.sock.recvfrom(self.message_size)
+        decoded_data = data.decode('utf-8')
+
+        sender, message = decoded_data.split(',', 1)
+
+        return (sender, message)
 
     def multicast(self, message):
         ''' unicast the message to all known clients '''
@@ -44,14 +52,15 @@ class Main:
 
     def process_message_out(self):
         for line in sys.stdin:
+            line = line[:-1]
             self.multicast(line)
 
 
     def process_message_in(self):
         while True:
             try:
-                message = self.deliver(self.my_ID)
-                print(message)
+                sender, message = self.deliver(self.my_ID)
+                print(sender, "says: ", message)
             except socket.timeout:
                 pass
             except BlockingIOError:
