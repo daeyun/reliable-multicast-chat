@@ -30,7 +30,7 @@ class Main:
         self.sock.bind((ip, port))
         self.sock.settimeout(0.01)
 
-    def unicast_send(self, destination, message, is_ack = False, ack_message_id = 0):
+    def unicast_send(self, destination, message, message_id = -1, is_ack = False):
         ''' destination: integer process ID
             message: string message '''
         host = config.config['hosts'][destination]
@@ -39,12 +39,15 @@ class Main:
 
         id = None
         if not is_ack:
-            self.message_id = self.message_id + 1
-            id = self.message_id
+            if message_id != -1:
+                self.message_id = self.message_id + 1
+                id = self.message_id
+            else:
+                id = message_id
             with self.mutex:
                 self.unack_messages.append((self.my_ID, id, message))
         else:
-            id = ack_message_id
+            id = message_id
 
         if random.random() <= self.drop_rate:
             return
@@ -60,12 +63,11 @@ class Main:
         sender, message_id, is_ack, message = unpack_message(data)
 
         if is_ack == 'True':
-            print("ack is received")
             self.has_acknowledged[(sender, message_id)] = True
             return (sender, None)
         else:
             # send acknowledgement to the sender
-            self.unicast_send(int(sender), "", True, message_id)
+            self.unicast_send(int(sender), "", message_id, True)
 
             if (sender, message_id) not in self.has_received:
                 self.has_received[(sender, message_id)] = True
@@ -91,7 +93,7 @@ class Main:
             for dest_id, message_id, message in self.unack_messages:
                 if (dest_id, message_id) not in self.has_acknowledged:
                     new_unack_messages.append((dest_id, message_id, message))
-                    self.multicast(message)
+                    self.unicast_send(dest_id, message, message_id)
 
             with self.mutex:
                 self.unack_messages = new_unack_messages
