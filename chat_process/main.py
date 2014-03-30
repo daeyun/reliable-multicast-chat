@@ -9,6 +9,8 @@ class Main:
     my_ID = 0
     sock = None
     message_size = 2048
+    message_id = 0
+    has_received = {}
 
     def init_socket(self, id):
         host = config.config['hosts'][id]
@@ -20,14 +22,21 @@ class Main:
         self.sock.bind((ip, port))
         self.sock.settimeout(0.01)
 
-    def unicast_send(self, destination, message):
+    def unicast_send(self, destination, message, is_ack = False, ack_message_id = 0):
         ''' destination: integer process ID
             message: string message '''
         host = config.config['hosts'][destination]
         ip = host[0]
         port = host[1]
 
-        message = str(self.my_ID) + "," + message
+        id = None
+        if not is_ack:
+            self.message_id = self.message_id + 1
+            id = self.message_id
+        else:
+            id = ack_message_id
+
+        message = str(self.my_ID) + "," + str(id) + "," + str(is_ack) + "," + message
         self.sock.sendto(message.encode("utf-8"), (ip, port))
 
     def unicast_receive(self, source):
@@ -36,9 +45,20 @@ class Main:
         data, addr = self.sock.recvfrom(self.message_size)
         decoded_data = data.decode('utf-8')
 
-        sender, message = decoded_data.split(',', 1)
+        sender, message_id, is_ack, message = decoded_data.split(',', 3)
 
-        return (sender, message)
+        if bool(is_ack):
+           
+           return (sender, None)
+        else:
+            # send acknowledgement to the sender
+            self.unicast_send(int(sender), "", True, message_id)
+
+            if (sender, message_id) in self.has_received:
+                self.has_received[(sender, message_id)] = True
+                return (sender, message)
+            else:
+                return (sender, None)
 
     def multicast(self, message):
         ''' unicast the message to all known clients '''
@@ -60,6 +80,8 @@ class Main:
         while True:
             try:
                 sender, message = self.deliver(self.my_ID)
+                if message == None:
+                    continue
                 print(sender, "says: ", message)
             except socket.timeout:
                 pass
