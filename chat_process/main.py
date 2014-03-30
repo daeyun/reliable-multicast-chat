@@ -30,7 +30,7 @@ class Main:
         self.sock.bind((ip, port))
         self.sock.settimeout(0.01)
 
-    def unicast_send(self, destination, message, message_id = -1, is_ack = False):
+    def unicast_send(self, destination, message, msg_id = -1, is_ack = False):
         ''' destination: integer process ID
             message: string message '''
         host = config.config['hosts'][destination]
@@ -39,15 +39,15 @@ class Main:
 
         id = None
         if not is_ack:
-            if message_id != -1:
+            if msg_id == -1:
                 self.message_id = self.message_id + 1
                 id = self.message_id
+                with self.mutex:
+                    self.unack_messages.append((destination, id, message))
             else:
-                id = message_id
-            with self.mutex:
-                self.unack_messages.append((self.my_ID, id, message))
+                id = msg_id
         else:
-            id = message_id
+            id = msg_id
 
         if random.random() <= self.drop_rate:
             return
@@ -61,6 +61,9 @@ class Main:
         data, _ = self.sock.recvfrom(self.message_size)
 
         sender, message_id, is_ack, message = unpack_message(data)
+
+        sender = int(sender)
+        message_id = int(message_id)
 
         if is_ack == 'True':
             self.has_acknowledged[(sender, message_id)] = True
@@ -87,9 +90,8 @@ class Main:
 
     def process_ack(self):
         while True:
-            time.sleep(1) # 100 msec
+            time.sleep(0.1) # 100 msec
             new_unack_messages = []
-            print (self.unack_messages)
             for dest_id, message_id, message in self.unack_messages:
                 if (dest_id, message_id) not in self.has_acknowledged:
                     new_unack_messages.append((dest_id, message_id, message))
