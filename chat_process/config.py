@@ -4,9 +4,9 @@ hosts is a list of (IP address, port, process id)
 
 config = {
     'hosts': [
-        ("172.16.150.36", 16405),
-        ("172.16.150.36", 16402),
-        ("172.16.204.65", 16411),
-        ("172.16.204.65", 16404),
+        ("localhost", 16405),
+        ("localhost", 16406),
+        ("localhost", 16407),
+        ("localhost", 16408),
     ],
 }
