@@ -59,14 +59,15 @@ class Main:
 
         sender, message_id, is_ack, message = unpack_message(data)
 
-        if bool(is_ack):
-           self.has_acknowledged[(sender, message_id)] = True
-           return (sender, None)
+        if is_ack == 'True':
+            print("ack is received")
+            self.has_acknowledged[(sender, message_id)] = True
+            return (sender, None)
         else:
             # send acknowledgement to the sender
             self.unicast_send(int(sender), "", True, message_id)
 
-            if (sender, message_id) in self.has_received:
+            if (sender, message_id) not in self.has_received:
                 self.has_received[(sender, message_id)] = True
                 return (sender, message)
             else:
@@ -84,8 +85,9 @@ class Main:
 
     def process_ack(self):
         while True:
-            time.sleep(0.1) # 100 msec
+            time.sleep(1) # 100 msec
             new_unack_messages = []
+            print (self.unack_messages)
             for dest_id, message_id, message in self.unack_messages:
                 if (dest_id, message_id) not in self.has_acknowledged:
                     new_unack_messages.append((dest_id, message_id, message))
@@ -130,11 +132,16 @@ class Main:
         in_thread = threading.Thread(target=self.process_message_in)
         in_thread.daemon = True
 
+        ack_thread = threading.Thread(target=self.process_ack)
+        ack_thread.daemon = True
+
         out_thread.start()
         in_thread.start()
+        ack_thread.start()
 
         out_thread.join()
         in_thread.join()
+        ack_thread.join()
 
 
 if __name__ == '__main__':
