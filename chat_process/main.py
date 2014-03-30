@@ -1,8 +1,11 @@
+import random
 import socket
 import config
 import struct
 import threading
 import sys
+import time
+from mp2.helpers.unicast_helper import pack_message, unpack_message
 
 
 class Main:
@@ -11,6 +14,9 @@ class Main:
     message_size = 2048
     message_id = 0
     has_received = {}
+    has_acknowledged = {}
+    unack_messages = []
+    mutex = threading.Lock()
 
     def init_socket(self, id):
         host = config.config['hosts'][id]
@@ -33,22 +39,26 @@ class Main:
         if not is_ack:
             self.message_id = self.message_id + 1
             id = self.message_id
+            with self.mutex:
+                self.unack_messages.append((self.my_ID, id, message))
         else:
             id = ack_message_id
 
-        message = str(self.my_ID) + "," + str(id) + "," + str(is_ack) + "," + message
+        if random.random() <= self.drop_rate:
+            return
+
+        message = pack_message([self.my_ID, id, is_ack, message])
         self.sock.sendto(message.encode("utf-8"), (ip, port))
 
     def unicast_receive(self, source):
         ''' source: integer process ID
             return: message string '''
-        data, addr = self.sock.recvfrom(self.message_size)
-        decoded_data = data.decode('utf-8')
+        data, _ = self.sock.recvfrom(self.message_size)
 
-        sender, message_id, is_ack, message = decoded_data.split(',', 3)
+        sender, message_id, is_ack, message = unpack_message(data)
 
         if bool(is_ack):
-           
+           self.has_acknowledged[(sender, message_id)] = True
            return (sender, None)
         else:
             # send acknowledgement to the sender
@@ -70,6 +80,19 @@ class Main:
             return: incoming message from the source process '''
         return self.unicast_receive(source)
 
+    def process_ack(self):
+        while True:
+            time.sleep(0.1) # 100 msec
+            new_unack_messages = []
+            for dest_id, message_id, message in self.unack_messages:
+                if (dest_id, message_id) not in self.has_acknowledged:
+                    new_unack_messages.append((dest_id, message_id, message))
+                    self.multicast(message)
+
+            with self.mutex:
+                self.unack_messages = new_unack_messages
+
+
     def process_message_out(self):
         for line in sys.stdin:
             line = line[:-1]
@@ -80,7 +103,7 @@ class Main:
         while True:
             try:
                 sender, message = self.deliver(self.my_ID)
-                if message == None:
+                if message is None:
                     continue
                 print(sender, "says: ", message)
             except socket.timeout:
@@ -89,11 +112,12 @@ class Main:
                 pass
 
     def run(self):
-        if len(sys.argv) != 2:
-            print('Usage: {} [process ID]'.format(sys.argv[0]))
+        if len(sys.argv) != 3:
+            print('Usage: {} [process ID] [drop rate]'.format(sys.argv[0]))
             return
 
         self.my_ID = int(sys.argv[1])
+        self.drop_rate = float(sys.argv[2])
 
         self.init_socket(self.my_ID)
 
