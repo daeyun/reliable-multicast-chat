@@ -5,7 +5,9 @@ import struct
 import threading
 import sys
 import time
-from mp2.helpers.unicast_helper import pack_message, unpack_message
+import os
+sys.path.append(os.path.dirname(os.path.realpath(__file__)) + '/../')
+from helpers.unicast_helper import pack_message, unpack_message
 
 
 class Main:
