@@ -7,6 +7,8 @@ import threading
 import sys
 import time
 import os
+from mp2.helpers.unicast_helper import stringify_vector_timestamp, parse_vector_timestamp
+
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + '/../')
 from helpers.unicast_helper import pack_message, unpack_message
 
@@ -21,6 +23,8 @@ class Main:
     unack_messages = []
     mutex = threading.Lock()
     queue = PriorityQueue()
+    timestamp = [0] * len(config.config['hosts'])
+    holdback_queue = []
 
     def init_socket(self, id):
         host = config.config['hosts'][id]
@@ -54,7 +58,7 @@ class Main:
         if random.random() <= self.drop_rate:
             return
 
-        message = pack_message([self.my_ID, id, is_ack, message])
+        message = pack_message([self.my_ID, id, is_ack, stringify_vector_timestamp(self.timestamp), message])
 
         delay_time = random.uniform(0, 2 * self.delay_time)
         end_time = time.time() + delay_time
@@ -65,7 +69,9 @@ class Main:
             return: message string '''
         data, _ = self.sock.recvfrom(self.message_size)
 
-        sender, message_id, is_ack, message = unpack_message(data)
+        sender, message_id, is_ack, vector_str, message = unpack_message(data)
+        message_timestamp = parse_vector_timestamp(vector_str)
+        self.holdback_queue.append(message_timestamp)
 
         sender = int(sender)
         message_id = int(message_id)
@@ -106,19 +112,21 @@ class Main:
     def process_ack(self):
         while True:
             time.sleep(0.1) # 100 msec
-            new_unack_messages = []
-            for dest_id, message_id, message in self.unack_messages:
-                if (dest_id, message_id) not in self.has_acknowledged:
-                    new_unack_messages.append((dest_id, message_id, message))
-                    self.unicast_send(dest_id, message, message_id)
-
             with self.mutex:
+                new_unack_messages = []
+                # @TODO: include vector time stamp
+                for dest_id, message_id, message in self.unack_messages:
+                    if (dest_id, message_id) not in self.has_acknowledged:
+                        new_unack_messages.append((dest_id, message_id, message))
+                        self.unicast_send(dest_id, message, message_id)
+
                 self.unack_messages = new_unack_messages
 
 
     def process_message_out(self):
         for line in sys.stdin:
             line = line[:-1]
+            self.timestamp[self.my_ID] = self.timestamp[self.myID] + 1
             self.multicast(line)
 
     def process_message_in(self):
