@@ -18,8 +18,8 @@ class ChatProcess:
         self.delay_time = delay_time
         self.drop_rate = drop_rate
 
-        self.message_size = 2048
-        self.message_id = 0
+        self.message_max_size = 2048
+        self.message_id_counter = 0
         self.has_received = {}
         self.has_acknowledged = {}
         self.unack_messages = []
@@ -27,71 +27,56 @@ class ChatProcess:
 
         self.queue = PriorityQueue()
         self.mutex = threading.Lock()
-
-        self.timestamp = [0] * num_processes
-
+        self.my_timestamp = [0] * num_processes
         self.init_socket(process_id)
 
     def init_socket(self, id):
         """ Initialize the UDP socket. """
-        host = config.config['hosts'][id]
-        ip = host[0]
-        port = host[1]
-
+        ip, port = config.config['hosts'][id]
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         self.sock.bind((ip, port))
         self.sock.settimeout(0.01)
 
-    def unicast_send(self, destination, message, msg_id = -1, is_ack = False, msg_timestamp = []):
+    def unicast_send(self, destination, message, msg_id=None, is_ack=False, timestamp=None):
         """ Push an outgoing message to the message queue. """
-        host = config.config['hosts'][destination]
-        ip = host[0]
-        port = host[1]
 
-        if len(msg_timestamp) == 0:
-            msg_timestamp = self.timestamp[:]
+        if timestamp is None:
+            timestamp = self.my_timestamp[:]
 
-        id = None
-        if not is_ack:
-            if msg_id == -1:
-                self.message_id = self.message_id + 1
-                id = self.message_id
-                with self.mutex:
-                    self.unack_messages.append((destination, id, message, msg_timestamp[:]))
-            else:
-                id = msg_id
-        else:
-            id = msg_id
+        if not is_ack and msg_id is None:
+            self.message_id_counter += 1
+            msg_id = self.message_id_counter
+            with self.mutex:
+                self.unack_messages.append((destination, msg_id, message, timestamp[:]))
 
         if random.random() <= self.drop_rate:
             return
 
-        message = pack_message([self.my_id, id, is_ack, stringify_vector_timestamp(msg_timestamp), message])
+        message = pack_message([self.my_id, msg_id, is_ack, stringify_vector_timestamp(timestamp), message])
 
+        ip, port = config.config['hosts'][destination]
         delay_time = random.uniform(0, 2 * self.delay_time)
         end_time = time.time() + delay_time
         self.queue.put((end_time, message.encode("utf-8"), ip, port))
 
-    def unicast_receive(self, source):
-        """ Receive UDP messages from other chat processes and store them in the holdback queue. """
-        data, _ = self.sock.recvfrom(self.message_size)
+    def unicast_receive(self):
+        """ Receive UDP messages from other chat processes and store them in the holdback queue.
+            Returns True if new message was received. """
+        data, _ = self.sock.recvfrom(self.message_max_size)
         [sender, message_id, is_ack, message_timestamp, message] = unpack_message(data)
 
         if is_ack:
             self.has_acknowledged[(sender, message_id)] = True
-            return (sender, None)
         else:
             # send acknowledgement to the sender
             self.unicast_send(int(sender), "", message_id, True)
-
             if (sender, message_id) not in self.has_received:
                 self.has_received[(sender, message_id)] = True
                 self.holdback_queue.append((sender, message_timestamp[:], message))
                 self.update_holdback_queue()
-                return (sender, message)
-            else:
-                return (sender, None)
+                return True
+        return False
 
     def update_holdback_queue(self):
         """ Compare message timestamps to ensure casual ordering. """
@@ -102,10 +87,10 @@ class ChatProcess:
                 should_remove = True
                 for i in range(len(v)):
                     if i == sender:
-                        if v[i] != self.timestamp[i] + 1:
+                        if v[i] != self.my_timestamp[i] + 1:
                             should_remove = False
                     else:
-                        if v[i] > self.timestamp[i]:
+                        if v[i] > self.my_timestamp[i]:
                             should_remove = False
                 if not should_remove:
                     new_holdback_queue.append((sender, v, message))
@@ -113,7 +98,7 @@ class ChatProcess:
                     removed.append((sender, v, message))
 
             for sender, v, message in removed:
-                self.timestamp[sender] = self.timestamp[sender] + 1
+                self.my_timestamp[sender] = self.my_timestamp[sender] + 1
                 self.deliver(sender, message)
 
             self.holdback_queue = new_holdback_queue
@@ -150,7 +135,7 @@ class ChatProcess:
                 for dest_id, message_id, message, message_timestamp in self.unack_messages:
                     if (dest_id, message_id) not in self.has_acknowledged:
                         new_unack_messages.append((dest_id, message_id, message, message_timestamp))
-                        self.unicast_send(dest_id, message, message_id, msg_timestamp=message_timestamp)
+                        self.unicast_send(dest_id, message, message_id, timestamp=message_timestamp)
                 self.unack_messages = new_unack_messages
 
 
@@ -158,19 +143,15 @@ class ChatProcess:
         """ Thread that waits for user input and multicasts to other processes. """
         for line in sys.stdin:
             line = line[:-1]
-            self.timestamp[self.my_id] = self.timestamp[self.my_id] + 1
+            self.my_timestamp[self.my_id] = self.my_timestamp[self.my_id] + 1
             self.multicast(line)
 
     def incoming_message_handler(self):
         """ Thread that listens for incoming UDP messages """
         while True:
             try:
-                sender, message = self.unicast_receive(self.my_id)
-                if message is None:
-                    continue
-            except socket.timeout:
-                pass
-            except BlockingIOError:
+                self.unicast_receive()
+            except (socket.timeout, BlockingIOError):
                 pass
 
     def run(self):
@@ -180,7 +161,7 @@ class ChatProcess:
             self.message_queue_handler,
             self.incoming_message_handler,
             self.user_input_handler,
-            ]
+        ]
 
         threads = []
         for callable in callable_objects:
