@@ -3,6 +3,7 @@ import sys
 import config
 from chat_process import ChatProcess
 
+
 def main():
     if len(sys.argv) != 4:
         print('Usage: {} [process ID] [delay time] [drop rate]'.format(sys.argv[0]))
