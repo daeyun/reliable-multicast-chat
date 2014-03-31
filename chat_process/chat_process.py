@@ -8,7 +8,7 @@ import time
 import os
 
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + '/../')
-from helpers.unicast_helper import pack_message, unpack_message
+from helpers.unicast_helper import pack_message, unpack_message, calculate_send_time
 from helpers.unicast_helper import stringify_vector_timestamp, parse_vector_timestamp
 
 
@@ -54,9 +54,8 @@ class ChatProcess:
         message = pack_message([self.my_id, msg_id, is_ack, stringify_vector_timestamp(timestamp), message])
 
         ip, port = config.config['hosts'][destination]
-        delay_time = random.uniform(0, 2 * self.delay_time)
-        end_time = time.time() + delay_time
-        self.queue.put((end_time, message.encode("utf-8"), ip, port))
+        send_time = calculate_send_time(self.delay_time)
+        self.queue.put((send_time, message, ip, port))
 
     def unicast_receive(self):
         """ Receive UDP messages from other chat processes and store them in the holdback queue.

@@ -1,5 +1,9 @@
+import random
+import time
+
+
 def pack_message(message_list):
-    return ",".join([str(x) for x in message_list])
+    return (",".join([str(x) for x in message_list])).encode('utf-8')
 
 
 def unpack_message(message):
@@ -20,3 +24,9 @@ def parse_vector_timestamp(vector_str):
 
 def stringify_vector_timestamp(vector):
     return ';'.join([str(x) for x in vector])
+
+
+def calculate_send_time(delay_time):
+    """ delay_time in seconds """
+    delay_time = random.uniform(0, 2 * delay_time)
+    return time.time() + delay_time
