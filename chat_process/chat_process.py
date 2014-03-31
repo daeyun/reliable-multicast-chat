@@ -28,11 +28,9 @@ class ChatProcess:
         self.queue = PriorityQueue()
         self.mutex = threading.Lock()
         self.my_timestamp = [0] * num_processes
-        self.init_socket(process_id)
 
-    def init_socket(self, id):
-        """ Initialize the UDP socket. """
-        ip, port = config.config['hosts'][id]
+        # Initialize the UDP socket.
+        ip, port = config.config['hosts'][process_id]
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
         self.sock.bind((ip, port))
@@ -82,7 +80,7 @@ class ChatProcess:
         """ Compare message timestamps to ensure casual ordering. """
         while True:
             new_holdback_queue = []
-            removed = []
+            removed_messages = []
             for sender, v, message in self.holdback_queue:
                 should_remove = True
                 for i in range(len(v)):
@@ -95,21 +93,21 @@ class ChatProcess:
                 if not should_remove:
                     new_holdback_queue.append((sender, v, message))
                 else:
-                    removed.append((sender, v, message))
+                    removed_messages.append((sender, v, message))
 
-            for sender, v, message in removed:
-                self.my_timestamp[sender] = self.my_timestamp[sender] + 1
+            for sender, v, message in removed_messages:
+                self.my_timestamp[sender] += 1
                 self.deliver(sender, message)
 
             self.holdback_queue = new_holdback_queue
 
-            if len(removed) == 0:
+            if not removed_messages:
                 break
 
     def multicast(self, message):
         """ Unicast the message to all known clients. """
-        for id, host in enumerate(config.config['hosts']):
-            self.unicast_send(id, message)
+        for process_id, host in enumerate(config.config['hosts']):
+            self.unicast_send(process_id, message)
 
     def deliver(self, sender, message):
         """ Do something with the received message. """
@@ -128,7 +126,7 @@ class ChatProcess:
     def ack_handler(self):
         """ Thread that re-sends all unacknowledged messages. """
         while True:
-            time.sleep(0.1)
+            time.sleep(0.2)
 
             with self.mutex:
                 new_unack_messages = []
@@ -138,12 +136,11 @@ class ChatProcess:
                         self.unicast_send(dest_id, message, message_id, timestamp=message_timestamp)
                 self.unack_messages = new_unack_messages
 
-
     def user_input_handler(self):
         """ Thread that waits for user input and multicasts to other processes. """
         for line in sys.stdin:
             line = line[:-1]
-            self.my_timestamp[self.my_id] = self.my_timestamp[self.my_id] + 1
+            self.my_timestamp[self.my_id] += 1
             self.multicast(line)
 
     def incoming_message_handler(self):
