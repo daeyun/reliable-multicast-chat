@@ -1,8 +1,9 @@
-from chat_process import ChatProcess
-import config
+import os
 import sys
+import config
+from chat_process import ChatProcess
 
-if __name__ == '__main__':
+def main():
     if len(sys.argv) != 4:
         print('Usage: {} [process ID] [delay time] [drop rate]'.format(sys.argv[0]))
         exit(1)
@@ -14,3 +15,6 @@ if __name__ == '__main__':
 
     chat_process = ChatProcess(process_id, delay_rate, drop_rate, num_processes)
     chat_process.run()
+
+if __name__ == '__main__':
+    main()
