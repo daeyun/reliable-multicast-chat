@@ -7,10 +7,10 @@ import threading
 import sys
 import time
 import os
-from mp2.helpers.unicast_helper import stringify_vector_timestamp, parse_vector_timestamp
 
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + '/../')
 from helpers.unicast_helper import pack_message, unpack_message
+from helpers.unicast_helper import stringify_vector_timestamp, parse_vector_timestamp
 
 
 class Main:
@@ -36,12 +36,16 @@ class Main:
         self.sock.bind((ip, port))
         self.sock.settimeout(0.01)
 
-    def unicast_send(self, destination, message, msg_id = -1, is_ack = False):
+    def unicast_send(self, destination, message, msg_id = -1, is_ack = False, msg_timestamp = []):
         ''' destination: integer process ID
             message: string message '''
         host = config.config['hosts'][destination]
         ip = host[0]
         port = host[1]
+
+
+        if len(msg_timestamp) == 0:
+            msg_timestamp = self.timestamp[:]
 
         id = None
         if not is_ack:
@@ -49,7 +53,7 @@ class Main:
                 self.message_id = self.message_id + 1
                 id = self.message_id
                 with self.mutex:
-                    self.unack_messages.append((destination, id, message))
+                    self.unack_messages.append((destination, id, message, msg_timestamp[:]))
             else:
                 id = msg_id
         else:
@@ -58,7 +62,7 @@ class Main:
         if random.random() <= self.drop_rate:
             return
 
-        message = pack_message([self.my_ID, id, is_ack, stringify_vector_timestamp(self.timestamp), message])
+        message = pack_message([self.my_ID, id, is_ack, stringify_vector_timestamp(msg_timestamp), message])
 
         delay_time = random.uniform(0, 2 * self.delay_time)
         end_time = time.time() + delay_time
@@ -70,12 +74,11 @@ class Main:
         data, _ = self.sock.recvfrom(self.message_size)
 
         sender, message_id, is_ack, vector_str, message = unpack_message(data)
-        message_timestamp = parse_vector_timestamp(vector_str)
-        self.holdback_queue.append((sender, message_timestamp, message))
-        self.update_holdback_queue()
 
         sender = int(sender)
         message_id = int(message_id)
+
+        message_timestamp = parse_vector_timestamp(vector_str)
 
         if is_ack == 'True':
             self.has_acknowledged[(sender, message_id)] = True
@@ -86,6 +89,8 @@ class Main:
 
             if (sender, message_id) not in self.has_received:
                 self.has_received[(sender, message_id)] = True
+                self.holdback_queue.append((sender, message_timestamp[:], message))
+                self.update_holdback_queue()
                 return (sender, message)
             else:
                 return (sender, None)
@@ -94,22 +99,23 @@ class Main:
         while True:
             new_holdback_queue = []
             removed = []
-            for sender, v in self.holdback_queue:
+            for sender, v, message in self.holdback_queue:
                 should_remove = True
                 for i in range(len(v)):
                     if i == sender:
-                        if v[i] != self.holdback_queue[i] + 1:
+                        if v[i] != self.timestamp[i] + 1:
                             should_remove = False
                     else:
-                        if v[i] > self.holdback_queue[i]:
+                        if v[i] > self.timestamp[i]:
                             should_remove = False
                 if not should_remove:
-                    new_holdback_queue.append((sender, v))
+                    new_holdback_queue.append((sender, v, message))
                 else:
-                    removed.append((sender, v))
+                    removed.append((sender, v, message))
 
-            for sender, v in removed:
+            for sender, v, message in removed:
                 self.timestamp[sender] = self.timestamp[sender] + 1
+                self.deliver(sender, message)
 
             self.holdback_queue = new_holdback_queue
 
@@ -121,10 +127,10 @@ class Main:
         for id, host in enumerate(config.config['hosts']):
             self.unicast_send(id, message)
 
-    def deliver(self, source):
+    def deliver(self, sender, message):
         ''' source: source process id
             return: incoming message from the source process '''
-        return self.unicast_receive(source)
+        print(sender, "says: ", message)
 
     def process_message_queue(self):
         while True:
@@ -139,13 +145,13 @@ class Main:
     def process_ack(self):
         while True:
             time.sleep(0.1) # 100 msec
+
             with self.mutex:
                 new_unack_messages = []
-                # @TODO: include vector time stamp
-                for dest_id, message_id, message in self.unack_messages:
+                for dest_id, message_id, message, message_timestamp in self.unack_messages:
                     if (dest_id, message_id) not in self.has_acknowledged:
-                        new_unack_messages.append((dest_id, message_id, message))
-                        self.unicast_send(dest_id, message, message_id)
+                        new_unack_messages.append((dest_id, message_id, message, message_timestamp))
+                        self.unicast_send(dest_id, message, message_id, msg_timestamp=message_timestamp)
 
                 self.unack_messages = new_unack_messages
 
@@ -153,16 +159,15 @@ class Main:
     def process_message_out(self):
         for line in sys.stdin:
             line = line[:-1]
-            self.timestamp[self.my_ID] = self.timestamp[self.myID] + 1
+            self.timestamp[self.my_ID] = self.timestamp[self.my_ID] + 1
             self.multicast(line)
 
     def process_message_in(self):
         while True:
             try:
-                sender, message = self.deliver(self.my_ID)
+                sender, message = self.unicast_receive(self.my_ID)
                 if message is None:
                     continue
-                print(sender, "says: ", message)
             except socket.timeout:
                 pass
             except BlockingIOError:
