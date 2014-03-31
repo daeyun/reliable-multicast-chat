@@ -57,8 +57,8 @@ class Main:
         message = pack_message([self.my_ID, id, is_ack, message])
 
         delay_time = random.uniform(0, 2 * self.delay_time)
-
-        self.sock.sendto(message.encode("utf-8"), (ip, port))
+        end_time = time.time() + delay_time
+        self.queue.put((end_time, message.encode("utf-8"), ip, port))
 
     def unicast_receive(self, source):
         ''' source: integer process ID
@@ -95,8 +95,13 @@ class Main:
 
     def process_message_queue(self):
         while True:
-            (end_time, message) = self.queue.get(block = True)
-            if end_time <= 
+            (end_time, message, ip, port) = self.queue.get(block=True)
+            if end_time <= time.time():
+                self.sock.sendto(message, (ip, port))
+            else:
+                self.queue.put((end_time, message, ip, port))
+                time.sleep(0.015)
+
 
     def process_ack(self):
         while True:
@@ -150,13 +155,18 @@ class Main:
         ack_thread = threading.Thread(target=self.process_ack)
         ack_thread.daemon = True
 
+        message_queue_thread = threading.Thread(target=self.process_message_queue)
+        message_queue_thread.daemon = True
+
+        message_queue_thread.start()
+        ack_thread.start()
         out_thread.start()
         in_thread.start()
-        ack_thread.start()
 
         out_thread.join()
         in_thread.join()
         ack_thread.join()
+        message_queue_thread.join()
 
 
 if __name__ == '__main__':
