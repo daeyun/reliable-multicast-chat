@@ -1,3 +1,4 @@
+from queue import PriorityQueue
 import random
 import socket
 import config
@@ -19,6 +20,7 @@ class Main:
     has_acknowledged = {}
     unack_messages = []
     mutex = threading.Lock()
+    queue = PriorityQueue()
 
     def init_socket(self, id):
         host = config.config['hosts'][id]
@@ -53,6 +55,9 @@ class Main:
             return
 
         message = pack_message([self.my_ID, id, is_ack, message])
+
+        delay_time = random.uniform(0, 2 * self.delay_time)
+
         self.sock.sendto(message.encode("utf-8"), (ip, port))
 
     def unicast_receive(self, source):
@@ -88,6 +93,11 @@ class Main:
             return: incoming message from the source process '''
         return self.unicast_receive(source)
 
+    def process_message_queue(self):
+        while True:
+            (end_time, message) = self.queue.get(block = True)
+            if end_time <= 
+
     def process_ack(self):
         while True:
             time.sleep(0.1) # 100 msec
@@ -120,12 +130,13 @@ class Main:
                 pass
 
     def run(self):
-        if len(sys.argv) != 3:
-            print('Usage: {} [process ID] [drop rate]'.format(sys.argv[0]))
+        if len(sys.argv) != 4:
+            print('Usage: {} [process ID] [delay time] [drop rate]'.format(sys.argv[0]))
             return
 
         self.my_ID = int(sys.argv[1])
-        self.drop_rate = float(sys.argv[2])
+        self.delay_time = float(sys.argv[2])
+        self.drop_rate = float(sys.argv[3])
 
         self.init_socket(self.my_ID)
 
