@@ -1,4 +1,3 @@
-import os
 import sys
 import config
 from chat_process import ChatProcess
