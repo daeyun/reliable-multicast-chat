@@ -121,7 +121,6 @@ class Main:
             line = line[:-1]
             self.multicast(line)
 
-
     def process_message_in(self):
         while True:
             try:
