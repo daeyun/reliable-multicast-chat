@@ -71,7 +71,8 @@ class Main:
 
         sender, message_id, is_ack, vector_str, message = unpack_message(data)
         message_timestamp = parse_vector_timestamp(vector_str)
-        self.holdback_queue.append(message_timestamp)
+        self.holdback_queue.append((sender, message_timestamp, message))
+        self.update_holdback_queue()
 
         sender = int(sender)
         message_id = int(message_id)
@@ -88,6 +89,32 @@ class Main:
                 return (sender, message)
             else:
                 return (sender, None)
+
+    def update_holdback_queue(self):
+        while True:
+            new_holdback_queue = []
+            removed = []
+            for sender, v in self.holdback_queue:
+                should_remove = True
+                for i in range(len(v)):
+                    if i == sender:
+                        if v[i] != self.holdback_queue[i] + 1:
+                            should_remove = False
+                    else:
+                        if v[i] > self.holdback_queue[i]:
+                            should_remove = False
+                if not should_remove:
+                    new_holdback_queue.append((sender, v))
+                else:
+                    removed.append((sender, v))
+
+            for sender, v in removed:
+                self.timestamp[sender] = self.timestamp[sender] + 1
+
+            self.holdback_queue = new_holdback_queue
+
+            if len(removed) == 0:
+                break
 
     def multicast(self, message):
         ''' unicast the message to all known clients '''
