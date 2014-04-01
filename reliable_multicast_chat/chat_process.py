@@ -52,9 +52,9 @@ class ChatProcess:
 
         message = pack_message([self.my_id, msg_id, is_ack, stringify_vector_timestamp(timestamp), message])
 
-        ip, port = config.config['hosts'][destination]
+        dest_ip, dest_port = config.config['hosts'][destination]
         send_time = calculate_send_time(self.delay_time)
-        self.queue.put((send_time, message, ip, port))
+        self.queue.put((send_time, message, dest_ip, dest_port))
 
     def unicast_receive(self):
         """ Receive UDP messages from other chat processes and store them in the holdback queue.
@@ -151,7 +151,7 @@ class ChatProcess:
 
     def run(self):
         """ Initialize and start all threads. """
-        callable_objects = [
+        thread_routines = [
             self.ack_handler,
             self.message_queue_handler,
             self.incoming_message_handler,
@@ -159,8 +159,8 @@ class ChatProcess:
         ]
 
         threads = []
-        for callable in callable_objects:
-            thread = threading.Thread(target=callable)
+        for thread_routine in thread_routines:
+            thread = threading.Thread(target=thread_routine)
             thread.daemon = True
             thread.start()
             threads.append(thread)
