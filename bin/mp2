@@ -2,7 +2,7 @@
 import os
 import sys
 
-sys.path.append(os.path.dirname(os.path.realpath(__file__)) + '/../chat_process/')
+sys.path.append(os.path.dirname(os.path.realpath(__file__)) + '/../reliable_multicast_chat/')
 from main import main
 
 main()
