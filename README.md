@@ -1,9 +1,11 @@
-### Usage
+#Reliable Multicast Chat
 
-Usage: ./reliable_multicast_chat [process ID] [delay time] [drop rate]
+## Usage
 
-Execute `reliable_multicast_chat` in `./bin` folder. For example,
+./reliable_multicast_chat [process ID] [delay time] [drop rate]
 
-### Requirement
+Execute `reliable_multicast_chat` in `./bin` folder.
+
+## Requirement
 
 * Python3
