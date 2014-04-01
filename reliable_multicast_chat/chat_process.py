@@ -7,7 +7,6 @@ import sys
 import time
 import os
 
-sys.path.append(os.path.dirname(os.path.realpath(__file__)) + '/../')
 from helpers.unicast_helper import pack_message, unpack_message, calculate_send_time
 from helpers.unicast_helper import stringify_vector_timestamp, parse_vector_timestamp
 
