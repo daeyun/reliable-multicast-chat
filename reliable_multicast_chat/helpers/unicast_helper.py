@@ -3,7 +3,7 @@ import time
 
 
 def pack_message(message_list):
-    return (",".join([str(x) for x in message_list])).encode('utf-8')
+    return (','.join([str(x) for x in message_list])).encode('utf-8')
 
 
 def unpack_message(message):
