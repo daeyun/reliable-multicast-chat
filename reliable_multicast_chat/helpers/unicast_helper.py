@@ -8,14 +8,15 @@ def pack_message(message_list):
 
 def unpack_message(message):
     message = message.decode('utf-8')
-    sender, message_id, is_ack, vector_str, message = message.split(',', 4)
+    sender, message_id, is_ack, is_order_marker, vector_str, message = message.split(',', 5)
 
     sender = int(sender)
     message_id = int(message_id)
     timestamp = parse_vector_timestamp(vector_str)
     is_ack = is_ack in ['True', 'true', '1']
+    is_order_marker = is_order_marker in ['True', 'true', '1']
 
-    return [sender, message_id, is_ack, timestamp, message]
+    return [sender, message_id, is_ack, is_order_marker, timestamp, message]
 
 
 def parse_vector_timestamp(vector_str):

@@ -24,6 +24,10 @@ class ChatProcess:
         self.unack_messages = []
         self.holdback_queue = []
 
+        self.holdback_queue_markers = []
+        self.sequence_counter = 0
+        self.sequencer_id = 0
+
         self.queue = PriorityQueue()
         self.mutex = threading.Lock()
         self.my_timestamp = [0] * num_processes
@@ -35,7 +39,7 @@ class ChatProcess:
         self.sock.bind((ip, port))
         self.sock.settimeout(0.01)
 
-    def unicast_send(self, destination, message, msg_id=None, is_ack=False, timestamp=None):
+    def unicast_send(self, destination, message, msg_id=None, is_ack=False, is_order_marker=False, timestamp=None):
         """ Push an outgoing message to the message queue. """
 
         if timestamp is None:
@@ -50,7 +54,7 @@ class ChatProcess:
         if random.random() <= self.drop_rate:
             return
 
-        message = pack_message([self.my_id, msg_id, is_ack, stringify_vector_timestamp(timestamp), message])
+        message = pack_message([self.my_id, msg_id, is_ack, is_order_marker, stringify_vector_timestamp(timestamp), message])
 
         dest_ip, dest_port = config.config['hosts'][destination]
         send_time = calculate_send_time(self.delay_time)
@@ -60,7 +64,7 @@ class ChatProcess:
         """ Receive UDP messages from other chat processes and store them in the holdback queue.
             Returns True if new message was received. """
         data, _ = self.sock.recvfrom(self.message_max_size)
-        [sender, message_id, is_ack, message_timestamp, message] = unpack_message(data)
+        [sender, message_id, is_ack, is_order_marker, message_timestamp, message] = unpack_message(data)
 
         if is_ack:
             self.has_acknowledged[(sender, message_id)] = True
@@ -69,12 +73,22 @@ class ChatProcess:
             self.unicast_send(int(sender), "", message_id, True)
             if (sender, message_id) not in self.has_received:
                 self.has_received[(sender, message_id)] = True
-                self.holdback_queue.append((sender, message_timestamp[:], message))
-                self.update_holdback_queue()
+                if config.config['ordering'] == 'casual':
+                    self.holdback_queue.append((sender, message_timestamp[:], message))
+                    self.update_holdback_queue_casual()
+                else:
+                    if self.my_id == self.sequencer_id:
+                        pass
+                    else:
+                        if is_order_marker:
+                            self.holdback_queue_markers.append((sender, message_id, message))
+                            self.update_holdback_queue_total()
+                        else:
+                            self.holdback_queue.append((sender, message_id, message))
                 return True
         return False
 
-    def update_holdback_queue(self):
+    def update_holdback_queue_casual(self):
         """ Compare message timestamps to ensure casual ordering. """
         while True:
             new_holdback_queue = []
@@ -101,6 +115,25 @@ class ChatProcess:
 
             if not removed_messages:
                 break
+
+    def update_holdback_queue_total(self):
+        while True:
+            # TODO: reduce marker list size
+            new_holdback_queue = []
+            for sender, message_id, message in self.holdback_queue:
+                is_delivered = False
+                for m_sender, m_message_id, m_sequence in self.holdback_queue_markers:
+                    m_sequence_int = int(m_sequence)
+                    if sender == m_sender and message_id == m_message_id and self.sequence_counter == m_sequence_int:
+                        self.deliver(sender, message)
+                        is_delivered = True
+                        self.sequence_counter += 1
+                        break
+
+                if not is_delivered:
+                    new_holdback_queue.append((sender, message_id, message))
+
+            self.holdback_queue = new_holdback_queue
 
     def multicast(self, message):
         """ Unicast the message to all known clients. """
