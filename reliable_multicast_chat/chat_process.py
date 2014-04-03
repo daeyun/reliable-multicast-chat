@@ -66,6 +66,8 @@ class ChatProcess:
         data, _ = self.sock.recvfrom(self.message_max_size)
         [sender, message_id, is_ack, is_order_marker, message_timestamp, message] = unpack_message(data)
 
+        print(data)
+
         if is_ack:
             self.has_acknowledged[(sender, message_id)] = True
         else:
