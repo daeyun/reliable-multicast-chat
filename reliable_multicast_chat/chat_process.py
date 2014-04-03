@@ -26,7 +26,7 @@ class ChatProcess:
 
         self.holdback_queue_markers = []
         self.sequence_counter = 0
-        self.sequencer_id = 0
+        self.SEQUENCER_ID = 0
 
         self.queue = PriorityQueue()
         self.mutex = threading.Lock()
@@ -41,7 +41,6 @@ class ChatProcess:
 
     def unicast_send(self, destination, message, msg_id=None, is_ack=False, is_order_marker=False, timestamp=None):
         """ Push an outgoing message to the message queue. """
-
         if timestamp is None:
             timestamp = self.my_timestamp[:]
 
@@ -63,6 +62,7 @@ class ChatProcess:
     def unicast_receive(self):
         """ Receive UDP messages from other chat processes and store them in the holdback queue.
             Returns True if new message was received. """
+
         data, _ = self.sock.recvfrom(self.message_max_size)
         [sender, message_id, is_ack, is_order_marker, message_timestamp, message] = unpack_message(data)
 
@@ -76,16 +76,23 @@ class ChatProcess:
                 if config.config['ordering'] == 'casual':
                     self.holdback_queue.append((sender, message_timestamp[:], message))
                     self.update_holdback_queue_casual()
+                    return True
                 else:
-                    if self.my_id == self.sequencer_id:
-                        pass
-                    else:
-                        if is_order_marker:
-                            self.holdback_queue_markers.append((sender, message_id, message))
-                            self.update_holdback_queue_total()
-                        else:
-                            self.holdback_queue.append((sender, message_id, message))
-                return True
+                    if is_order_marker:
+                        m_sequencer = int(message.split(';')[0])
+                        m_sender = int(message.split(';')[1])
+                        self.holdback_queue_markers.append((m_sender, message_id, m_sequencer))
+                        self.update_holdback_queue_total()
+
+                    if self.my_id == self.SEQUENCER_ID:
+                        message = str(self.sequence_counter) + ';' + str(sender)
+                        self.multicast(message, is_order_marker=True)
+                        self.sequence_counter += 1
+
+                    self.holdback_queue.append((sender, message_id, message))
+
+                    if not is_order_marker:
+                        return True
         return False
 
     def update_holdback_queue_casual(self):
@@ -117,6 +124,8 @@ class ChatProcess:
                 break
 
     def update_holdback_queue_total(self):
+        print(self.holdback_queue)
+        print(self.holdback_queue_markers)
         while True:
             # TODO: reduce marker list size
             new_holdback_queue = []
@@ -135,10 +144,10 @@ class ChatProcess:
 
             self.holdback_queue = new_holdback_queue
 
-    def multicast(self, message):
+    def multicast(self, message, is_order_marker=False):
         """ Unicast the message to all known clients. """
         for process_id, host in enumerate(config.config['hosts']):
-            self.unicast_send(process_id, message)
+            self.unicast_send(process_id, message, is_order_marker=is_order_marker)
 
     def deliver(self, sender, message):
         """ Do something with the received message. """

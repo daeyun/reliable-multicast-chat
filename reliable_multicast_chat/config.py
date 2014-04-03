@@ -8,7 +8,6 @@ config = {
     'hosts': [
         ('localhost', 16400),
         ('localhost', 16401),
-        ('localhost', 16402),
     ],
-    'ordering': 'casual',
+    'ordering': 'total',
 }
