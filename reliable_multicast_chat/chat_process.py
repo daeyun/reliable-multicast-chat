@@ -25,6 +25,7 @@ class ChatProcess:
         self.holdback_queue = []
 
         self.holdback_queue_markers = []
+        self.holdback_sequence_counter = 0
         self.sequence_counter = 0
         self.SEQUENCER_ID = 0
 
@@ -44,18 +45,18 @@ class ChatProcess:
         if timestamp is None:
             timestamp = self.my_timestamp[:]
 
+        is_msg_id_specified = msg_id is not None
         if msg_id is None:
             msg_id = self.message_id_counter
 
-        if random.random() <= self.drop_rate:
-            return
-
         message = pack_message([self.my_id, msg_id, is_ack, is_order_marker, stringify_vector_timestamp(timestamp), message])
 
-        if not is_ack and msg_id is None:
+        if not is_ack and not is_msg_id_specified:
             with self.mutex:
                 self.unack_messages.append((destination, message))
 
+        if random.random() <= self.drop_rate:
+            return
 
         dest_ip, dest_port = config.config['hosts'][destination]
         send_time = calculate_send_time(self.delay_time)
@@ -91,6 +92,7 @@ class ChatProcess:
                             self.sequence_counter += 1
 
                         self.holdback_queue.append((sender, message_id, message))
+                        self.update_holdback_queue_total()
                         return True
         return False
 
@@ -126,15 +128,16 @@ class ChatProcess:
         while True:
             # TODO: reduce marker list size
             new_holdback_queue = []
-            is_delivered = False
+            is_ever_delivered = False
             for sender, message_id, message in self.holdback_queue:
                 is_delivered = False
                 for m_sender, m_message_id, m_sequence in self.holdback_queue_markers:
                     m_sequence_int = int(m_sequence)
-                    if sender == m_sender and message_id == m_message_id and self.sequence_counter == m_sequence_int:
+                    if sender == m_sender and message_id == m_message_id and self.holdback_sequence_counter == m_sequence_int:
                         self.deliver(sender, message)
                         is_delivered = True
-                        self.sequence_counter += 1
+                        is_ever_delivered = True
+                        self.holdback_sequence_counter += 1
                         break
 
                 if not is_delivered:
@@ -142,7 +145,7 @@ class ChatProcess:
 
             self.holdback_queue = new_holdback_queue
 
-            if not is_delivered:
+            if not is_ever_delivered:
                 break
 
     def multicast(self, message, is_order_marker=False):
@@ -175,7 +178,7 @@ class ChatProcess:
                 for dest_id, packed_message in self.unack_messages:
                     [_, message_id, is_ack, is_order_marker, message_timestamp, message] = unpack_message(packed_message)
                     if (dest_id, message_id) not in self.has_acknowledged:
-                        new_unack_messages.append((dest_id, message_id, message, message_timestamp))
+                        new_unack_messages.append((dest_id, packed_message))
                         self.unicast_send(dest_id, message, msg_id=message_id, is_ack=is_ack,
                                           is_order_marker=is_order_marker, timestamp=message_timestamp)
                 self.unack_messages = new_unack_messages
