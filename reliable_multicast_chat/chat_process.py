@@ -44,16 +44,18 @@ class ChatProcess:
         if timestamp is None:
             timestamp = self.my_timestamp[:]
 
-        if not is_ack and msg_id is None:
-            self.message_id_counter += 1
+        if msg_id is None:
             msg_id = self.message_id_counter
-            with self.mutex:
-                self.unack_messages.append((destination, msg_id, message, timestamp[:]))
 
         if random.random() <= self.drop_rate:
             return
 
         message = pack_message([self.my_id, msg_id, is_ack, is_order_marker, stringify_vector_timestamp(timestamp), message])
+
+        if not is_ack and msg_id is None:
+            with self.mutex:
+                self.unack_messages.append((destination, message))
+
 
         dest_ip, dest_port = config.config['hosts'][destination]
         send_time = calculate_send_time(self.delay_time)
@@ -65,8 +67,6 @@ class ChatProcess:
 
         data, _ = self.sock.recvfrom(self.message_max_size)
         [sender, message_id, is_ack, is_order_marker, message_timestamp, message] = unpack_message(data)
-
-        print(data)
 
         if is_ack:
             self.has_acknowledged[(sender, message_id)] = True
@@ -81,19 +81,16 @@ class ChatProcess:
                     return True
                 else:
                     if is_order_marker:
-                        m_sequencer = int(message.split(';')[0])
-                        m_sender = int(message.split(';')[1])
-                        self.holdback_queue_markers.append((m_sender, message_id, m_sequencer))
+                        m_sequencer, m_sender, m_id = [int(x) for x in message.split(';')]
+                        self.holdback_queue_markers.append((m_sender, m_id, m_sequencer))
                         self.update_holdback_queue_total()
+                    else:
+                        if self.my_id == self.SEQUENCER_ID:
+                            marker_message = ';'.join([str(x) for x in [self.sequence_counter, sender, message_id]])
+                            self.multicast(marker_message, is_order_marker=True)
+                            self.sequence_counter += 1
 
-                    if self.my_id == self.SEQUENCER_ID:
-                        message = str(self.sequence_counter) + ';' + str(sender)
-                        self.multicast(message, is_order_marker=True)
-                        self.sequence_counter += 1
-
-                    self.holdback_queue.append((sender, message_id, message))
-
-                    if not is_order_marker:
+                        self.holdback_queue.append((sender, message_id, message))
                         return True
         return False
 
@@ -126,11 +123,10 @@ class ChatProcess:
                 break
 
     def update_holdback_queue_total(self):
-        print(self.holdback_queue)
-        print(self.holdback_queue_markers)
         while True:
             # TODO: reduce marker list size
             new_holdback_queue = []
+            is_delivered = False
             for sender, message_id, message in self.holdback_queue:
                 is_delivered = False
                 for m_sender, m_message_id, m_sequence in self.holdback_queue_markers:
@@ -146,10 +142,14 @@ class ChatProcess:
 
             self.holdback_queue = new_holdback_queue
 
+            if not is_delivered:
+                break
+
     def multicast(self, message, is_order_marker=False):
         """ Unicast the message to all known clients. """
         for process_id, host in enumerate(config.config['hosts']):
             self.unicast_send(process_id, message, is_order_marker=is_order_marker)
+        self.message_id_counter += 1
 
     def deliver(self, sender, message):
         """ Do something with the received message. """
@@ -172,10 +172,12 @@ class ChatProcess:
 
             with self.mutex:
                 new_unack_messages = []
-                for dest_id, message_id, message, message_timestamp in self.unack_messages:
+                for dest_id, packed_message in self.unack_messages:
+                    [_, message_id, is_ack, is_order_marker, message_timestamp, message] = unpack_message(packed_message)
                     if (dest_id, message_id) not in self.has_acknowledged:
                         new_unack_messages.append((dest_id, message_id, message, message_timestamp))
-                        self.unicast_send(dest_id, message, message_id, timestamp=message_timestamp)
+                        self.unicast_send(dest_id, message, msg_id=message_id, is_ack=is_ack,
+                                          is_order_marker=is_order_marker, timestamp=message_timestamp)
                 self.unack_messages = new_unack_messages
 
     def user_input_handler(self):
@@ -190,7 +192,7 @@ class ChatProcess:
         while True:
             try:
                 self.unicast_receive()
-            except (socket.timeout, BlockingIOError):
+            except (socket.timeout, BlockingIOError) as e:
                 pass
 
     def run(self):
